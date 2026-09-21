@@ -1,4 +1,3 @@
-
 from pathlib import Path
 
 import numpy as np
@@ -18,12 +17,12 @@ IMAGE_SIZE = 96
 BATCH_SIZE = 128
 EPOCHS = 15
 LEARNING_RATE = 1e-4
+
+MAX_IMAGES = 20_000
 VALIDATION_SIZE = 0.2
 SEED = 42
 
-DEVICE = torch.device(
-    "cuda" if torch.cuda.is_available() else "cpu"
-)
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def evaluate(model, loader):
@@ -34,40 +33,65 @@ def evaluate(model, loader):
 
     with torch.no_grad():
         for images, batch_labels in loader:
-            images = images.to(
-                DEVICE,
-                non_blocking=True
-            )
+            images = images.to(DEVICE, non_blocking=True)
 
             logits = model(images)
             probs = torch.sigmoid(logits).flatten()
 
-            probabilities.extend(
-                probs.cpu().numpy()
-            )
-
-            labels.extend(
-                batch_labels.numpy()
-            )
+            probabilities.extend(probs.cpu().numpy())
+            labels.extend(batch_labels.numpy())
 
     probabilities = np.array(probabilities)
     labels = np.array(labels)
 
-    predictions = (
-        probabilities >= 0.5
-    ).astype(int)
+    predictions = (probabilities >= 0.5).astype(int)
 
-    accuracy = accuracy_score(
-        labels,
-        predictions
-    )
-
-    auc = roc_auc_score(
-        labels,
-        probabilities
-    )
+    accuracy = accuracy_score(labels, predictions)
+    auc = roc_auc_score(labels, probabilities)
 
     return accuracy, auc
+
+
+def select_balanced_subset(labels, max_images, seed):
+    rng = np.random.default_rng(seed)
+
+    positive_indices = np.where(labels == 1)[0]
+    negative_indices = np.where(labels == 0)[0]
+
+    per_class = max_images // 2
+
+    if len(positive_indices) < per_class:
+        raise ValueError(
+            f"Not enough positive images. "
+            f"Found {len(positive_indices)}, need {per_class}."
+        )
+
+    if len(negative_indices) < per_class:
+        raise ValueError(
+            f"Not enough negative images. "
+            f"Found {len(negative_indices)}, need {per_class}."
+        )
+
+    positive_selected = rng.choice(
+        positive_indices,
+        size=per_class,
+        replace=False
+    )
+
+    negative_selected = rng.choice(
+        negative_indices,
+        size=per_class,
+        replace=False
+    )
+
+    selected = np.concatenate([
+        positive_selected,
+        negative_selected
+    ])
+
+    rng.shuffle(selected)
+
+    return selected
 
 
 def main():
@@ -77,14 +101,12 @@ def main():
         torch.cuda.manual_seed_all(SEED)
 
         print("CUDA available")
-        print(
-            f"GPU: {torch.cuda.get_device_name(0)}"
-        )
-
+        print(f"GPU: {torch.cuda.get_device_name(0)}")
     else:
         print("CUDA not available. Using CPU.")
 
     print(f"Device: {DEVICE}")
+    print()
 
     dataset = HistopathDataset(
         data_dir=DATA_DIR,
@@ -93,19 +115,21 @@ def main():
         training=True
     )
 
-    labels = dataset.df[
-        dataset.label_col
-    ].astype(int).values
+    labels = dataset.df[dataset.label_col].astype(int).values
 
-    indices = np.arange(len(dataset))
+    selected_indices = select_balanced_subset(
+        labels,
+        MAX_IMAGES,
+        SEED
+    )
 
-    train_indices, validation_indices = (
-        train_test_split(
-            indices,
-            test_size=VALIDATION_SIZE,
-            random_state=SEED,
-            stratify=labels
-        )
+    selected_labels = labels[selected_indices]
+
+    train_indices, validation_indices = train_test_split(
+        selected_indices,
+        test_size=VALIDATION_SIZE,
+        random_state=SEED,
+        stratify=selected_labels
     )
 
     train_dataset = Subset(
@@ -141,17 +165,6 @@ def main():
         pin_memory=torch.cuda.is_available()
     )
 
-    print(f"Total images: {len(dataset)}")
-    print(f"Training images: {len(train_dataset)}")
-    print(
-        f"Validation images: "
-        f"{len(validation_dataset)}"
-    )
-
-    model = CancerModel(
-        pretrained=True
-    ).to(DEVICE)
-
     train_labels = labels[train_indices]
 
     positive = np.sum(train_labels == 1)
@@ -162,6 +175,10 @@ def main():
         dtype=torch.float32,
         device=DEVICE
     )
+
+    model = CancerModel(
+        pretrained=True
+    ).to(DEVICE)
 
     criterion = torch.nn.BCEWithLogitsLoss(
         pos_weight=pos_weight
@@ -193,12 +210,22 @@ def main():
     patience = 4
     patience_counter = 0
 
+    print(f"Total dataset images: {len(dataset)}")
+    print(f"Selected images: {len(selected_indices)}")
+    print(f"Positive images: {np.sum(selected_labels == 1)}")
+    print(f"Negative images: {np.sum(selected_labels == 0)}")
+    print(f"Training images: {len(train_dataset)}")
+    print(f"Validation images: {len(validation_dataset)}")
+    print()
+
     for epoch in range(EPOCHS):
+
         model.train()
 
         running_loss = 0.0
 
         for images, batch_labels in train_loader:
+
             images = images.to(
                 DEVICE,
                 non_blocking=True
@@ -227,6 +254,7 @@ def main():
             scaler.scale(loss).backward()
 
             scaler.step(optimizer)
+
             scaler.update()
 
             running_loss += loss.item()
@@ -236,11 +264,9 @@ def main():
             len(train_loader)
         )
 
-        validation_accuracy, validation_auc = (
-            evaluate(
-                model,
-                validation_loader
-            )
+        validation_accuracy, validation_auc = evaluate(
+            model,
+            validation_loader
         )
 
         scheduler.step(validation_auc)
@@ -253,17 +279,15 @@ def main():
         )
 
         if validation_auc > best_auc:
+
             best_auc = validation_auc
             patience_counter = 0
 
             torch.save(
                 {
-                    "model_state_dict":
-                        model.state_dict(),
-                    "image_size":
-                        IMAGE_SIZE,
-                    "val_auc":
-                        validation_auc
+                    "model_state_dict": model.state_dict(),
+                    "image_size": IMAGE_SIZE,
+                    "val_auc": validation_auc
                 },
                 "checkpoints/best_model.pt"
             )
@@ -274,20 +298,20 @@ def main():
             )
 
         else:
+
             patience_counter += 1
 
             if patience_counter >= patience:
+
                 print("Early stopping.")
                 break
 
     print()
     print("Training finished.")
     print(
-        f"Best validation AUC: "
-        f"{best_auc:.4f}"
+        f"Best validation AUC: {best_auc:.4f}"
     )
 
 
 if __name__ == "__main__":
     main()
-

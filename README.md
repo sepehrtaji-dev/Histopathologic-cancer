@@ -30,7 +30,7 @@ The project was built as a hands-on deep learning experiment with a focus on:
 The project includes a modern desktop application built with **PyQt6**, featuring a clean dark interface for loading an image and running the trained model.
 
 <p align="center">
-  <img src="assets/dark.png" alt="Histopathologic Cancer Detection - Dark UI" width="900">
+  <img src="asset/dark.png" alt="Histopathologic Cancer Detection - Dark UI" width="900">
 </p>
 
 The interface provides:

@@ -1,79 +1,122 @@
-# 🔬 Histopathologic Cancer Detection
+# Histopathologic Cancer Detection
 
-A deep learning project for **experimental histopathology image classification** using PyTorch and a ResNet18-based neural network.
+A deep learning project for detecting cancer in histopathology images using a fine-tuned **ResNet18** classifier, with a polished **PyQt6 desktop app** called **Nova** for real-time inference.
 
-> ⚠️ This project is strictly educational and experimental. It is not a medical diagnostic system and must not be used for real-world medical decisions.
-
----
-
-## ✨ Overview
-
-This project explores how a convolutional neural network can learn visual patterns from histopathology images and classify them into two categories:
-
-- 🟢 Non-Cancer
-- 🔴 Cancer
-
-The project was built as a hands-on deep learning experiment with a focus on:
-
-- GPU-accelerated training
-- Image augmentation
-- Transfer learning
-- Class balancing
-- Validation metrics
-- Model checkpointing
-- A clean desktop prediction interface
+![Nova Preview](_nova_preview.png)
 
 ---
 
-## 🖥️ Application
+## Overview
 
-The project includes a modern desktop application built with **PyQt6**, featuring a clean dark interface for loading an image and running the trained model.
+This project tackles the [Histopathologic Cancer Detection](https://www.kaggle.com/competitions/histopathologic-cancer-detection) Kaggle challenge — binary classification of 96×96 histopathology patch images as cancerous or non-cancerous.
 
-<p align="center">
-  <img src="asset/dark.png" alt="Histopathologic Cancer Detection - Dark UI" width="900">
-</p>
-
-The interface provides:
-
-- 🖼️ Image preview
-- 🧠 Neural network prediction
-- 📊 Cancer probability
-- 🎨 Dark / Light UI
-- ⚡ GPU-powered inference
-- 🍎 Minimal, modern interface
+| Component | Details |
+|-----------|---------|
+| Model | ResNet18 (pretrained on ImageNet) |
+| Task | Binary classification (cancer / non-cancer) |
+| Input size | 96 × 96 px |
+| Loss | BCEWithLogitsLoss (class-weighted) |
+| Optimizer | AdamW (lr=1e-4, weight_decay=1e-4) |
+| Scheduler | ReduceLROnPlateau |
+| Mixed precision | torch.amp (CUDA) |
+| Early stopping | Patience = 4 epochs |
 
 ---
 
-## 🧠 Model
+## Project Structure
 
-The current model is based on **ResNet18** with a custom binary classification head.
+```
+Histopathologic-cancer/
+├── model.py       # ResNet18-based CancerModel definition
+├── dataset.py     # HistopathDataset — data loading & augmentation
+├── train.py       # Training loop with AUC-based early stopping
+├── app.py         # Nova — PyQt6 desktop inference app
+├── checkpoints/   # Saved model weights (best_model.pt)
+└── data/          # Dataset images + _labels.csv (not tracked)
+```
 
-### Architecture
+---
 
-```text
-Input Image
-    │
-    ▼
-Resize → 96 × 96
-    │
-    ▼
-ResNet18 Backbone
-    │
-    ├── Convolutional Layers
-    ├── Residual Blocks
-    └── Feature Extraction
-    │
-    ▼
-Dropout
-    │
-    ▼
-Linear Layer
-    │
-    ▼
-Cancer Logit
-    │
-    ▼
-Sigmoid
-    │
-    ▼
-Cancer Probability
+## Setup
+
+### Requirements
+
+```bash
+pip install torch torchvision PyQt6 pandas scikit-learn Pillow
+```
+
+### Dataset
+
+Download the dataset from [Kaggle](https://www.kaggle.com/competitions/histopathologic-cancer-detection/data) and place it as:
+
+```
+data/
+├── _labels.csv
+├── <image_id>.tif
+└── ...
+```
+
+---
+
+## Training
+
+```bash
+python train.py
+```
+
+**Key hyperparameters** (editable in `train.py`):
+
+| Parameter | Value |
+|-----------|-------|
+| Epochs | 15 |
+| Batch size | 128 |
+| Max images | 20,000 (balanced) |
+| Validation split | 20% |
+| Image size | 96 × 96 |
+
+The best model checkpoint (by validation AUC) is saved to `checkpoints/best_model.pt`.
+
+**Augmentations used during training:**
+- Random horizontal & vertical flips
+- Random rotation (±15°)
+- Color jitter (brightness, contrast, saturation)
+- ImageNet normalization
+
+---
+
+## Nova — Desktop App
+
+Nova is a minimal, dark-themed PyQt6 app for running inference on your own histopathology images.
+
+```bash
+python app.py
+```
+
+**Features:**
+- Load TIFF / PNG / JPG images
+- Real-time cancer probability prediction
+- Confidence progress bar
+- Light / dark theme toggle
+- Displays cancer probability percentage
+
+> ⚠️ **Research & educational use only — not a medical diagnosis tool.**
+
+---
+
+## Model Architecture
+
+```
+ResNet18 (ImageNet pretrained)
+└── fc: Sequential(
+      Dropout(0.3),
+      Linear(512 → 1)
+    )
+```
+
+Output is a raw logit; `sigmoid` is applied at inference time to get a probability in [0, 1].
+
+---
+
+## License
+
+See [LICENSE](LICENSE).
